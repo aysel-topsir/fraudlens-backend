@@ -185,7 +185,7 @@ def build_prediction_response(model, input_df, fraud_type):
 
     return {
         "status": "success",
-        "analysisFocus": instruction.strip() if instruction else "",
+        "analysisFocus": "",
         "backendConnected": True,
         "fraudType": fraud_type,
         "prediction": prediction,
