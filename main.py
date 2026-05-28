@@ -184,6 +184,7 @@ def build_prediction_response(model, input_df, fraud_type):
 
     return {
         "status": "success",
+        "analysisFocus": instruction.strip() if instruction else "",
         "backendConnected": True,
         "fraudType": fraud_type,
         "prediction": prediction,
@@ -243,7 +244,7 @@ def build_upload_preview(df: pd.DataFrame):
     }
 
 
-def build_data_analyst_report(df: pd.DataFrame):
+def build_data_analyst_report(df: pd.DataFrame, instruction: str = ""):
     row_count = int(df.shape[0])
     column_count = int(df.shape[1])
     duplicate_rows = int(df.duplicated().sum())
@@ -326,7 +327,54 @@ def build_data_analyst_report(df: pd.DataFrame):
                         }
                     )
 
+    focus_text = instruction.strip()
+    focus_lower = focus_text.lower()
+
+    focus_recommendations = []
+
+    if focus_text:
+        focus_recommendations.append(
+            f"Analysis focus applied: {focus_text}. The report was prioritized according to this analyst-defined focus."
+        )
+
+    if any(word in focus_lower for word in ["outlier", "outliear", "aykırı", "aykiri"]):
+        focus_recommendations.append(
+            "Outlier-focused review: Variables with high IQR-based outlier counts should be prioritized before model training. Outlier capping may be considered, but the original dataset is not automatically modified."
+        )
+
+    if any(word in focus_lower for word in ["class", "sınıf", "sinif", "imbalance", "dengesiz", "denge", "balance", "class balance"]):
+        if class_distribution:
+            counts = list(class_distribution.values())
+            max_count = max(counts)
+            min_count = min(counts)
+            imbalance_ratio = round(max_count / min_count, 2) if min_count else None
+            focus_recommendations.append(
+                f"Class-balance-focused review: The observed class distribution should be evaluated before modeling. Majority/minority ratio is approximately {imbalance_ratio}."
+            )
+        else:
+            focus_recommendations.append(
+                "Class-balance-focused review: No Class column was detected, so class imbalance could not be computed."
+            )
+
+    if any(word in focus_lower for word in ["missing", "eksik", "null", "nan"]):
+        focus_recommendations.append(
+            f"Missing-value-focused review: Total missing values detected: {total_missing}. Missingness should be handled before model training if present."
+        )
+
+    if any(word in focus_lower for word in ["correlation", "korelasyon", "redundancy"]):
+        focus_recommendations.append(
+            "Correlation-focused review: Highly correlated feature pairs should be examined for redundancy before feature selection and model training."
+        )
+
+    base_recommendations = [
+        "Sınıf dağılımı modelleme öncesinde kontrol edilmelidir.",
+        "Eksik değer bulunması durumunda uygun imputasyon stratejisi belirlenmelidir.",
+        "Aykırı değerler IQR tabanlı sınırlandırma yöntemiyle değerlendirilebilir.",
+        "Yüksek korelasyonlu değişkenler özellik tekrarları açısından incelenmelidir.",
+    ]
+
     report = {
+        "analysisFocus": focus_text,
         "datasetOverview": {
             "rowCount": row_count,
             "columnCount": column_count,
@@ -345,17 +393,13 @@ def build_data_analyst_report(df: pd.DataFrame):
         "outliers": outlier_summary,
         "targetCorrelations": target_correlations,
         "featureRedundancy": feature_redundancy,
-        "recommendations": [
-            "Sınıf dağılımı modelleme öncesinde kontrol edilmelidir.",
-            "Eksik değer bulunması durumunda uygun imputasyon stratejisi belirlenmelidir.",
-            "Aykırı değerler IQR tabanlı sınırlandırma yöntemiyle değerlendirilebilir.",
-            "Yüksek korelasyonlu değişkenler feature redundancy açısından incelenmelidir.",
-        ],
+        "recommendations": focus_recommendations + base_recommendations,
     }
 
     return {
         "status": "success",
         "message": "Data Analyst raporu başarıyla üretildi.",
+        "analysisFocus": focus_text,
         "report": report,
     }
 
@@ -1006,7 +1050,7 @@ async def agentic_upload_preview(file: UploadFile = File(...)):
 
 
 @app.post("/agentic/data-analyst")
-async def run_data_analyst(file: UploadFile = File(...)):
+async def run_data_analyst(file: UploadFile = File(...), instruction: str = Form("")):
     if not file.filename.endswith(".csv"):
         return {
             "status": "error",
@@ -1015,7 +1059,7 @@ async def run_data_analyst(file: UploadFile = File(...)):
 
     try:
         df = pd.read_csv(file.file)
-        return build_data_analyst_report(df)
+        return build_data_analyst_report(df, instruction)
 
     except Exception as error:
         return {
